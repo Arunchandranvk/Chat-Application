@@ -159,37 +159,60 @@ class MessageView(APIView):
             message = data.get('message')
             receiver_id = data.get('receiver')  # For one-to-one chat
             group_id = data.get('group')  # For group chat
-            if not message:
-                return Response({"error": "Message content is required"}, status=400)
+            image = request.FILES.get('image')  # Get image from request
+
+            if not message and not image:
+                return Response({"error": "Message content or image is required"}, status=400)
+
             if receiver_id:  # One-to-one chat
                 try:
                     receiver = CustomUser.objects.get(id=receiver_id)
-                    msg = Message.objects.create(sender=sender, receiver=receiver, content=message)
+                    msg = Message.objects.create(
+                        sender=sender,
+                        receiver=receiver,
+                        content=message,
+                        image=image,
+                        is_image=bool(image)  # Set is_image to True if image is uploaded
+                    )
                     Notification.objects.create(
                         user=receiver,
-                        message=f"You have a new message from {sender.username}: {message}"
+                        message=f"You have a new message from {sender.name}: {message or 'Image'}"
                     )
                     return Response({"success": "Message sent successfully", "message_id": msg.id}, status=201)
                 except CustomUser.DoesNotExist:
                     return Response({"error": "Receiver not found"}, status=404)
+
             elif group_id:  # Group chat
                 try:
                     group = Group.objects.get(id=group_id)
                     if sender not in group.members.all():  # Assuming `members` is a ManyToManyField
                         return Response({"error": "You are not a member of this group"}, status=403)
-                    msg = Message.objects.create(sender=sender, group=group, content=message)
+                    
+                    msg = Message.objects.create(
+                        sender=sender,
+                        group=group,
+                        content=message,
+                        image=image,
+                        is_image=bool(image)  # Set is_image based on image presence
+                    )
+                    
                     for member in group.members.all():
                         if member != sender:
                             Notification.objects.create(
                                 user=member,
-                                message=f"New message in group {group.name}: {message}")
+                                message=f"New message in group {group.name}: {message or 'Image'}"
+                            )
+                    
                     return Response({"success": "Message sent to group successfully", "message_id": msg.id}, status=201)
                 except Group.DoesNotExist:
                     return Response({"error": "Group not found"}, status=404)
+            
             else:
                 return Response({"error": "Receiver or group ID is required"}, status=400)
+
         except Exception as e:
             return Response({"error": str(e)}, status=500)
+
 
 
 class UsersView(APIView):

@@ -67,8 +67,14 @@ class Message(models.Model):
     sender = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='sent_messages',null=True)
     receiver = models.ForeignKey(CustomUser, null=True, blank=True, related_name='received_messages', on_delete=models.CASCADE)
     group = models.ForeignKey(Group, null=True, blank=True, on_delete=models.CASCADE)
-    content = models.TextField()
+    content = models.TextField(null=True,blank=True)
+    image = models.FileField(upload_to="messages_Image",null=True,blank=True)
+    is_image = models.BooleanField(default=False)
     timestamp = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        self.is_image = bool(self.image)  # Set True if image exists, otherwise False
+        super().save(*args, **kwargs)
 
     def __str__(self):
         if self.group:
