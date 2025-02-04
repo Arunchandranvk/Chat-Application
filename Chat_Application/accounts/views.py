@@ -134,7 +134,7 @@ class MessageView(APIView):
             if chat_type == 'personal':
                 messages = Message.objects.filter(
                     Q(sender=user, receiver_id=target_id) | Q(sender_id=target_id, receiver=user)
-                )
+                ).order_by('timestamp')
             elif chat_type == 'group':
                 try:
                     group = Group.objects.get(id=target_id)
@@ -194,7 +194,7 @@ class MessageView(APIView):
 
 class UsersView(APIView):
     def get(self,request):
-        users = CustomUser.objects.filter(is_superuser=0)
+        users = CustomUser.objects.all()
         serializer = RegistrationSer(users,many=True)
         return Response(serializer.data,status=status.HTTP_200_OK)
     
