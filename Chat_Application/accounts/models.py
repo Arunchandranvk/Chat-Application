@@ -91,3 +91,16 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Notification for {self.user.name} - {self.message[:20]}"
+    
+    
+class MessageScheduler(models.Model):
+    sender = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='scheduled_messages')
+    receiver = models.ForeignKey(CustomUser, null=True, blank=True, related_name='scheduled_received_messages', on_delete=models.CASCADE)
+    group = models.ForeignKey(Group, null=True, blank=True, on_delete=models.CASCADE)
+    content = models.TextField(null=True, blank=True)
+    image = models.FileField(upload_to="scheduled_messages", null=True, blank=True)
+    scheduled_time = models.DateTimeField()
+    is_sent = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"Scheduled message from {self.sender.email} at {self.scheduled_time}"

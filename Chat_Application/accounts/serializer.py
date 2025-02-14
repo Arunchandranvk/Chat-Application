@@ -45,10 +45,20 @@ class MessageSerializer(serializers.ModelSerializer):
 
 
 class GroupSerializer(serializers.ModelSerializer):
+    members = serializers.SerializerMethodField()
+
     class Meta:
         model = Group
         fields = '__all__'
 
+    def get_members(self, obj):
+        return [{"id": member.id, "name": member.name} for member in obj.members.all()]
+
+class GroupSer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Group
+        fields = '__all__'
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:

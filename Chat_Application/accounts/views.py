@@ -47,7 +47,7 @@ class GroupView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        serializer = GroupSerializer(data=request.data)
+        serializer = GroupSer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -118,44 +118,108 @@ class LeaveGroupView(APIView):
             return Response({"error": "Group not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+from django.utils.translation import activate
+
+from googletrans import Translator
+from Crypto.Cipher import AES
+import base64
+import json
 
 
 class MessageView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
+    SECRET_KEY = b"8c4d9a4a8f5b3a7f0f89a6d2c1b9e37b9275a314b8f5a3c6c1e8f9d6a2b4c1d8"  # Must be 32 bytes for AES-256
+    IV = b"a3b5c7d9e1f2a3b5c7d9e1f2a3b5c7d9"  # Must be 16 bytes
+
+    def get_user_language(self, request):
+        """Retrieve the user's selected language from request headers or profile."""
+        return request.headers.get("Accept-Language", "en")  # Default to English
+
+    def decrypt_text(self, encrypted_text):
+        """Decrypt AES encrypted text."""
+        try:
+            encrypted_data = base64.b64decode(encrypted_text)  # Decode from Base64
+            cipher = AES.new(self.SECRET_KEY, AES.MODE_CBC, self.IV)
+            decrypted_bytes = cipher.decrypt(encrypted_data)
+            decrypted_text = decrypted_bytes.rstrip(b"\0").decode("utf-8")  # Remove padding
+            return decrypted_text
+        except Exception as e:
+            return "Decryption failed"
+
+    def encrypt_text(self, plain_text):
+        """Encrypt text using AES."""
+        try:
+            cipher = AES.new(self.SECRET_KEY, AES.MODE_CBC, self.IV)
+            padded_text = plain_text + (16 - len(plain_text) % 16) * "\0"  # Padding
+            encrypted_bytes = cipher.encrypt(padded_text.encode("utf-8"))
+            encrypted_text = base64.b64encode(encrypted_bytes).decode("utf-8")  # Encode to Base64
+            return encrypted_text
+        except Exception as e:
+            return "Encryption failed"
+
+    def translate_text(self, text, src_lang, dest_lang):
+        """Translate text using Google Translate."""
+        if src_lang == dest_lang:
+            return text  # No translation needed
+        try:
+            translator = Translator()
+            translated = translator.translate(text, src=src_lang, dest=dest_lang)
+            return translated.text
+        except Exception as e:
+            return text  # Fallback to original if translation fails
+
     def get(self, request):
         user = request.user
-        chat_type = request.query_params.get('type')  # 'personal' or 'group'
-        target_id = request.query_params.get('id')  # user ID for personal, group ID for group
+        chat_type = request.query_params.get("type")  # 'personal' or 'group'
+        target_id = request.query_params.get("id")  # user ID for personal, group ID for group
         if not chat_type or not target_id:
             return Response({"error": "Chat type and target ID are required"}, status=400)
+
+        user_language = self.get_user_language(request)  # Get user's selected language
+        activate(user_language)  # Activate translation
+
         try:
-            if chat_type == 'personal':
+            if chat_type == "personal":
                 messages = Message.objects.filter(
                     Q(sender=user, receiver_id=target_id) | Q(sender_id=target_id, receiver=user)
-                ).order_by('timestamp')
-            elif chat_type == 'group':
+                ).order_by("timestamp")
+            elif chat_type == "group":
                 try:
                     group = Group.objects.get(id=target_id)
-                    if user not in group.members.all():  # Assuming a `members` ManyToMany field in the Group model
+                    if user not in group.members.all():
                         return Response({"error": "You are not a member of this group"}, status=403)
                 except Group.DoesNotExist:
                     return Response({"error": "Group not found"}, status=404)
                 messages = Message.objects.filter(group=group)
             else:
                 return Response({"error": "Invalid chat type"}, status=400)
+
             if not messages.exists():
                 return Response({"message": "No messages found"}, status=200)
+
+            # Serialize messages
             serializer = MessageSerializer(messages, many=True)
-            return Response(serializer.data)
+            data = serializer.data
+
+            # Process messages: Decrypt -> Translate -> Encrypt
+            for message in data:
+                decrypted_text = self.decrypt_text(message["content"])  # Step 1: Decrypt
+                translated_text = self.translate_text(decrypted_text, "auto", user_language)  # Step 2: Translate
+                encrypted_text = self.encrypt_text(translated_text)  # Step 3: Encrypt
+                message["content"] = encrypted_text  # Step 4: Replace with encrypted translated text
+
+            return Response(data)
         except Exception as e:
-            return Response({"error": str(e)}, status=500)
+            return Response({"error": str(e)}, status=500)  
 
     def post(self, request):
         try:
             data = request.data
             sender = request.user
+            print(sender)
             message = data.get('message')
             receiver_id = data.get('receiver')  # For one-to-one chat
             group_id = data.get('group')  # For group chat
@@ -167,12 +231,14 @@ class MessageView(APIView):
             if receiver_id:  # One-to-one chat
                 try:
                     receiver = CustomUser.objects.get(id=receiver_id)
+                    print(receiver_id)   
+                    print(image)
                     msg = Message.objects.create(
                         sender=sender,
                         receiver=receiver,
                         content=message,
                         image=image,
-                        is_image=bool(image)  # Set is_image to True if image is uploaded
+                        # is_image=bool(image)  # Set is_image to True if image is uploaded
                     )
                     Notification.objects.create(
                         user=receiver,
@@ -242,7 +308,6 @@ class MarkAsReadView(APIView):
 
 from django.http import JsonResponse
 from googletrans import Translator
-
 def translate_text(request):
     if request.method == "POST":
         text = request.POST.get("text")
@@ -259,3 +324,35 @@ def translate_text(request):
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
     return JsonResponse({"error": "Invalid request method. Use POST."}, status=405)
+
+from django.utils.timezone import make_aware
+from datetime import datetime
+import pytz
+
+
+class ScheduleMessageView(APIView):
+    def post(self, request):
+        sender_id = request.user.id
+        receiver_id = request.data.get('receiver_id')
+        group_id = request.data.get('group_id')
+        content = request.data.get('content', '')
+        image = request.FILES.get('image')
+        send_time = request.data.get('send_time')
+
+        if send_time:
+            # Parse the string to a naive datetime object
+            naive_datetime = datetime.strptime(send_time, '%Y-%m-%d %H:%M:%S')
+
+            # Make it timezone-aware in IST
+            ist_timezone = pytz.timezone('Asia/Kolkata')
+            send_time = make_aware(naive_datetime, timezone=ist_timezone)
+
+        scheduled_message = MessageScheduler.objects.create(
+            sender_id=sender_id,
+            receiver_id=receiver_id,
+            group_id=group_id,
+            content=content,
+            image=image,
+            scheduled_time=send_time
+        )  
+        return Response({"message": "Message scheduled successfully", "scheduled_message_id": scheduled_message.id})
