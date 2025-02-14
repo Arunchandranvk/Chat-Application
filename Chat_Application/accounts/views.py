@@ -121,22 +121,42 @@ class LeaveGroupView(APIView):
         
 from django.utils.translation import activate
 
-from googletrans import Translator
+# from googletrans import Translator
 from Crypto.Cipher import AES
 import base64
 import json
+from Crypto.Util.Padding import unpad,pad
+from google.cloud import translate_v2 as translate
 
 
 class MessageView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
-    SECRET_KEY = b"8c4d9a4a8f5b3a7f0f89a6d2c1b9e37b9275a314b8f5a3c6c1e8f9d6a2b4c1d8"  # Must be 32 bytes for AES-256
-    IV = b"a3b5c7d9e1f2a3b5c7d9e1f2a3b5c7d9"  # Must be 16 bytes
+    # Example of a 32-byte key for AES-256
+    #  Example of a 32-byte key for AES-256
+    SECRET_KEY = b"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpX"  # 32 bytes
+
+    # Ensure IV is 16 bytes (this is already correct in your code)
+    IV = b"eyJhbGciOiJIUzI1"  # 16 bytes
+
 
     def get_user_language(self, request):
         """Retrieve the user's selected language from request headers or profile."""
         return request.headers.get("Accept-Language", "en")  # Default to English
+
+    
+
+    def encrypt_text(self, plain_text):
+        """Encrypt text using AES."""
+        try:
+            cipher = AES.new(self.SECRET_KEY, AES.MODE_CBC, self.IV)
+            padded_text = pad(plain_text.encode("utf-8"), AES.block_size)  # PKCS7 padding
+            encrypted_bytes = cipher.encrypt(padded_text)
+            encrypted_text = base64.b64encode(encrypted_bytes).decode("utf-8")  # Encode to Base64
+            return encrypted_text
+        except Exception as e:
+            return f"Encryption failed: {str(e)}"
 
     def decrypt_text(self, encrypted_text):
         """Decrypt AES encrypted text."""
@@ -144,32 +164,32 @@ class MessageView(APIView):
             encrypted_data = base64.b64decode(encrypted_text)  # Decode from Base64
             cipher = AES.new(self.SECRET_KEY, AES.MODE_CBC, self.IV)
             decrypted_bytes = cipher.decrypt(encrypted_data)
-            decrypted_text = decrypted_bytes.rstrip(b"\0").decode("utf-8")  # Remove padding
+            decrypted_text = unpad(decrypted_bytes, AES.block_size).decode("utf-8")  # Remove padding
             return decrypted_text
         except Exception as e:
-            return "Decryption failed"
+            return f"Decryption failed: {str(e)}"
 
-    def encrypt_text(self, plain_text):
-        """Encrypt text using AES."""
-        try:
-            cipher = AES.new(self.SECRET_KEY, AES.MODE_CBC, self.IV)
-            padded_text = plain_text + (16 - len(plain_text) % 16) * "\0"  # Padding
-            encrypted_bytes = cipher.encrypt(padded_text.encode("utf-8"))
-            encrypted_text = base64.b64encode(encrypted_bytes).decode("utf-8")  # Encode to Base64
-            return encrypted_text
-        except Exception as e:
-            return "Encryption failed"
+
+         
 
     def translate_text(self, text, src_lang, dest_lang):
-        """Translate text using Google Translate."""
+        """Translate text using Google Cloud Translate API."""
         if src_lang == dest_lang:
             return text  # No translation needed
         try:
-            translator = Translator()
-            translated = translator.translate(text, src=src_lang, dest=dest_lang)
-            return translated.text
+            print(f"Source Language: {src_lang}, Destination Language: {dest_lang}")
+            translate_client = translate.Client()
+            print(f"Original text: {text}")
+
+            # Translate text
+            result = translate_client.translate(text, source_language=src_lang, target_language=dest_lang)
+            translated_text = result['translatedText']
+            print(f"Translated text: {translated_text}")
+
+            return translated_text
         except Exception as e:
-            return text  # Fallback to original if translation fails
+            print(f"Translation failed: {e}")
+            return text # Fallback to original if translation fails
 
     def get(self, request):
         user = request.user
@@ -203,16 +223,19 @@ class MessageView(APIView):
             # Serialize messages
             serializer = MessageSerializer(messages, many=True)
             data = serializer.data
-
+ 
             # Process messages: Decrypt -> Translate -> Encrypt
+            # print(data)
             for message in data:
                 decrypted_text = self.decrypt_text(message["content"])  # Step 1: Decrypt
+                print("decrypted",decrypted_text)
                 translated_text = self.translate_text(decrypted_text, "auto", user_language)  # Step 2: Translate
+                print("translated",translated_text)
                 encrypted_text = self.encrypt_text(translated_text)  # Step 3: Encrypt
                 message["content"] = encrypted_text  # Step 4: Replace with encrypted translated text
 
             return Response(data)
-        except Exception as e:
+        except Exception as e: 
             return Response({"error": str(e)}, status=500)  
 
     def post(self, request):
