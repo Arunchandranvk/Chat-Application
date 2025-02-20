@@ -13,5 +13,6 @@ urlpatterns = [
     path('notifications/mark_as_read/<int:notification_id>/', MarkAsReadView.as_view(), name='mark_as_read'),
     path("translate/", translate_text, name="translate_text"),
      path("sheduler/", ScheduleMessageView.as_view(), name="sheduler"),
+     path("chatbot/", GroqChatAPIView.as_view(), name="chatbot"),
 
 ]
